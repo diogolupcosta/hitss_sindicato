@@ -11,10 +11,11 @@ import streamlit as st
 # =========================
 # Config da página
 # =========================
-# =========================
-# Config da página
-# =========================
-st.set_page_config(page_title="Oposição - Extrator de Tabelas", layout="centered", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="Oposição - Extrator de Tabelas",
+    layout="centered",
+    initial_sidebar_state="expanded",
+)
 
 # --- LOGO acima do cabeçalho ---
 from pathlib import Path
@@ -22,7 +23,7 @@ LOGO_PATH = Path(__file__).with_name("Customer-Logos-09.png")  # ajuste se estiv
 
 c1, c2, c3 = st.columns([1, 2, 1])  # centraliza
 with c2:
-    st.image(str(LOGO_PATH), width=260)  # use_container_width=True se quiser ocupar toda a coluna
+    st.image(str(LOGO_PATH), width=260)
 
 # Cabeçalho
 st.title("Extrator de Tabelas do Sindicato | HITSS")
@@ -71,40 +72,32 @@ def has_ignored_text(text: str) -> bool:
 
 def clean_cells(df: pd.DataFrame) -> pd.DataFrame:
     """Tira quebras de linha e espaços redundantes em todas as células."""
-    df = df.applymap(lambda v: v.replace("\n", " ").strip() if isinstance(v, str) else v)
-    return df
+    return df.applymap(lambda v: v.replace("\n", " ").strip() if isinstance(v, str) else v)
 
 
 def drop_empty_rows_cols(df: pd.DataFrame) -> pd.DataFrame:
     """Remove linhas/colunas totalmente vazias."""
     df = df.dropna(axis=1, how="all")
     df = df.dropna(axis=0, how="all")
-    # também limpa colunas/linhas feitas só de strings vazias
     df = df[[c for c in df.columns if not all((str(x).strip() == "" or pd.isna(x)) for x in df[c])]]
     df = df.loc[~df.apply(lambda r: all((str(x).strip() == "" or pd.isna(x)) for x in r), axis=1)]
     return df.reset_index(drop=True)
 
 
 def is_mostly_int_column(series_or_df: pd.Series | pd.DataFrame, min_ratio: float = 0.8) -> bool:
-    """Retorna True se a coluna tem >= min_ratio de inteiros (ou vazios). Aceita Series ou DataFrame.
-
-    - Se vier DataFrame (colunas duplicadas), reduz a uma Series pegando o primeiro valor não vazio por linha.
-    """
+    """True se a coluna tem >= min_ratio de inteiros (ou vazios). Aceita Series ou DataFrame."""
     if isinstance(series_or_df, pd.DataFrame):
-        # pega o primeiro valor "não vazio" por linha
         series = series_or_df.apply(
             lambda r: next((x for x in r if pd.notna(x) and str(x).strip() != ""), None), axis=1
         )
     else:
         series = series_or_df
-
     valid = series.dropna().astype(str).str.strip()
     if valid.empty:
         return False
     hits = valid.str.match(r"^\d+$").sum()
     ratio = hits / len(valid)
     return ratio >= min_ratio
-
 
 
 # =========================
@@ -115,7 +108,6 @@ def extract_tables_from_pdf(pdf_bytes: bytes) -> List[pd.DataFrame]:
     dfs: List[pd.DataFrame] = []
 
     def safe_extract(page, settings: Dict[str, Any]):
-        # Remove argumentos desconhecidos para compatibilidade entre versões
         while True:
             try:
                 return page.extract_tables(settings) or []
@@ -179,10 +171,7 @@ def dedupe_columns(cols):
 # Mapeamento por cabeçalho
 # =========================
 def map_by_header(df: pd.DataFrame) -> Optional[pd.DataFrame]:
-    """
-    Usa a 1ª linha como cabeçalho. Procura colunas: nome / cpf / data (data entrega, data de entrega, data).
-    Remove colunas-resíduo com inteiros.
-    """
+    """Usa 1ª linha como cabeçalho; procura nome/cpf/data; remove colunas-resíduo numéricas."""
     if df.empty:
         return None
 
@@ -193,11 +182,9 @@ def map_by_header(df: pd.DataFrame) -> Optional[pd.DataFrame]:
 
     header = [str(x) for x in df.iloc[0].tolist()]
     body = df.iloc[1:].reset_index(drop=True)
-    # deduplica nomes repetidos do cabeçalho (CPF, CPF.1, ...)
     body.columns = dedupe_columns(header)
 
-
-    # Drop colunas-resíduo (quase só inteiros)
+    # remove colunas-resíduo (quase só inteiros)
     to_drop = []
     for c in body.columns:
         nc = norm_txt(c)
@@ -207,7 +194,6 @@ def map_by_header(df: pd.DataFrame) -> Optional[pd.DataFrame]:
             to_drop.append(c)
     body = body.drop(columns=to_drop) if to_drop else body
 
-
     norm_cols = [norm_txt(c) for c in body.columns]
     colmap: Dict[str, str] = {}
 
@@ -216,20 +202,18 @@ def map_by_header(df: pd.DataFrame) -> Optional[pd.DataFrame]:
         if "cpf" in c:
             colmap["cpf"] = body.columns[i]
             break
-
     # nome
     for i, c in enumerate(norm_cols):
         if "nome" in c or "empregado" in c or "trabalhador" in c:
             colmap["nome"] = body.columns[i]
             break
-
-    # data (aceita "data entrega", "data de entrega", somente "data")
+    # data
     for i, c in enumerate(norm_cols):
         if ("data" in c and "entreg" in c) or (c == "data") or ("data" in c and "opos" in c):
             colmap["data de entrega"] = body.columns[i]
             break
 
-    # fallback data: qualquer coluna com muitos padrões dd/mm/aaaa
+    # fallback: coluna com muitas datas
     if "data de entrega" not in colmap:
         for col in body.columns:
             s = body[col].dropna().astype(str)
@@ -249,10 +233,9 @@ def map_by_header(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     mask = out.apply(lambda r: any(has_ignored_text(str(v)) for v in r), axis=1)
     out = out.loc[~mask]
 
-    # remove linhas totalmente vazias e duplicadas
+    # normalizações finais
     out = out.replace(r"^\s*$", pd.NA, regex=True).dropna(how="all").drop_duplicates()
     out = out.reset_index(drop=True)
-
     return out if not out.empty else None
 
 
@@ -260,11 +243,7 @@ def map_by_header(df: pd.DataFrame) -> Optional[pd.DataFrame]:
 # Fallback por regex (linha a linha)
 # =========================
 def parse_by_regex(df: pd.DataFrame) -> Optional[pd.DataFrame]:
-    """
-    Junta as células de cada linha e tenta extrair: NOME (antes do CPF), CPF e DATA (primeira após CPF).
-    Ignora linhas de cabeçalho e textos institucionais.
-    Também ignora lixo numérico após a data (ex.: ... 10/01/2025 1).
-    """
+    """Extrai nome (antes do CPF), CPF e data (primeira data) juntando células da linha."""
     if df.empty:
         return None
 
@@ -280,31 +259,23 @@ def parse_by_regex(df: pd.DataFrame) -> Optional[pd.DataFrame]:
             continue
         line = " ".join(cells)
 
-        # ignora cabeçalhos e textos institucionais
         nline = norm_txt(line)
         if ("nome" in nline and "cpf" in nline and "data" in nline) or has_ignored_text(line):
             continue
 
         m_cpf = CPF_RE.search(line)
         m_date = DATE_RE.search(line)
-
         if not m_cpf or not m_date:
-            # às vezes a data pode estar em outra célula: tenta no conjunto de células
             joined = " ".join(cells)
             m_cpf = m_cpf or CPF_RE.search(joined)
             m_date = m_date or DATE_RE.search(joined)
 
         if m_cpf and m_date:
-            cpf = m_cpf.group(0)
-            date_pos = m_date.start()
             cpf_pos = m_cpf.start()
-            # nome: conteúdo antes do CPF
             nome = line[:cpf_pos].strip()
-            # data: primeira data encontrada após (ou antes) do cpf
+            cpf = m_cpf.group(0)
             data = m_date.group(0)
-            # validações simples
             if nome and CPF_RE.fullmatch(cpf) and DATE_RE.fullmatch(data):
-                # filtra linhas com textos ignorados
                 if not has_ignored_text(nome):
                     rows.append({"nome": nome, "cpf": cpf, "data de entrega": data})
 
@@ -324,13 +295,11 @@ def process_pdf(pdf_bytes: bytes) -> List[pd.DataFrame]:
     usable: List[pd.DataFrame] = []
 
     for df in raw_tables:
-        # 1) tenta por cabeçalho
         mapped = map_by_header(df)
         if mapped is not None and not mapped.empty:
             usable.append(mapped)
             continue
 
-        # 2) fallback por regex
         parsed = parse_by_regex(df)
         if parsed is not None and not parsed.empty:
             usable.append(parsed)
@@ -339,10 +308,9 @@ def process_pdf(pdf_bytes: bytes) -> List[pd.DataFrame]:
 
 
 # =========================
-# UI
+# UI: Uploader + CSS traduzido
 # =========================
-uploaded_pdf = st.file_uploader("Botão de upload de **planilha de oposição** (PDF)", type=["pdf"])
-go = st.button("Extrair e unir")
+uploaded_pdf = st.file_uploader("Upload do PDF de Oposições", type=["pdf"])
 
 if uploaded_pdf is None:
     st.info("Envie um PDF para começar.")
@@ -353,27 +321,31 @@ with st.spinner("Lendo PDF e identificando tabelas..."):
     tables = process_pdf(pdf_bytes)
 
 if not tables:
-    st.error("Encontrei tabelas, mas **não consegui mapear nome/CPF/data**. "
-             "Se possível, envie 1 página de exemplo para ajustarmos as heurísticas.")
+    st.error(
+        "Encontrei tabelas, mas **não consegui mapear nome/CPF/data**. "
+        "Se possível, envie 1 página de exemplo para ajustarmos as heurísticas."
+    )
     st.stop()
 
-st.subheader("Pré-visualização (somente: nome / cpf / data de entrega)")
-for i, tdf in enumerate(tables, start=1):
-    with st.expander(f"Tabela {i} — {tdf.shape[0]} linhas", expanded=False):
-        st.dataframe(tdf, use_container_width=True, height=320)
+# =========================
+# Pré-visualização unificada + Download
+# =========================
+unified_df = (
+    pd.concat(tables, ignore_index=True)
+      .replace(r"^\s*$", pd.NA, regex=True)
+      .dropna(how="all")
+      .drop_duplicates()
+      .reset_index(drop=True)
+)
 
-if go:
-    final_df = pd.concat(tables, ignore_index=True)
-    # limpeza final: tirar duplicadas e linhas vazias
-    final_df = final_df.replace(r"^\s*$", pd.NA, regex=True).dropna(how="all").drop_duplicates().reset_index(drop=True)
+st.subheader("Pré-visualização — Tabela unificada (nome / cpf / data de entrega)")
+st.caption(f"{unified_df.shape[0]} linhas • {unified_df.shape[1]} colunas")
+st.dataframe(unified_df, use_container_width=True, height=440)
 
-    st.success(f"Tabelas unidas: {final_df.shape[0]} linhas")
-    st.dataframe(final_df, use_container_width=True, height=420)
-
-    csv_bytes = final_df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button(
-        "Baixar CSV",
-        data=csv_bytes,
-        file_name="oposicoes_unificadas.csv",
-        mime="text/csv",
-    )
+csv_bytes = unified_df.to_csv(index=False).encode("utf-8-sig")
+st.download_button(
+    "Baixar CSV",
+    data=csv_bytes,
+    file_name="oposicoes_unificadas.csv",
+    mime="text/csv",
+)

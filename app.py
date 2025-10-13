@@ -12,7 +12,7 @@ import streamlit as st
 # Config da página
 # =========================
 st.set_page_config(page_title="Oposição - Extrator de Tabelas", layout="wide")
-st.title("Extrator de Tabelas (PDF) → nome / cpf / data de entrega")
+st.title("Extrator de Tabelas do Sindicato | HITSS")
 
 st.caption(
     "Carregue um PDF. O app extrai apenas **tabelas**, ignora cabeçalhos/rodapés institucionais, "

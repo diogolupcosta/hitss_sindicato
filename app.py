@@ -11,14 +11,27 @@ import streamlit as st
 # =========================
 # Config da página
 # =========================
-st.set_page_config(page_title="Oposição - Extrator de Tabelas", layout="wide")
-st.title("Extrator de Tabelas do Sindicato | HITSS")
+# =========================
+# Config da página
+# =========================
+st.set_page_config(page_title="Oposição - Extrator de Tabelas", layout="centered", initial_sidebar_state="expanded")
 
+# --- LOGO acima do cabeçalho ---
+from pathlib import Path
+LOGO_PATH = Path(__file__).with_name("Customer-Logos-09.png")  # ajuste se estiver em outra pasta
+
+c1, c2, c3 = st.columns([1, 2, 1])  # centraliza
+with c2:
+    st.image(str(LOGO_PATH), width=260)  # use_container_width=True se quiser ocupar toda a coluna
+
+# Cabeçalho
+st.title("Extrator de Tabelas do Sindicato | HITSS")
 st.caption(
     "Carregue um PDF. O app extrai apenas **tabelas**, ignora cabeçalhos/rodapés institucionais, "
     "e mantém as colunas **nome**, **cpf** e **data de entrega**. Se o cabeçalho não vier claro, "
     "usamos um fallback por **regex** para identificar CPF e Data."
 )
+
 
 # =========================
 # Constantes e utilidades

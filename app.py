@@ -8,6 +8,26 @@ import pandas as pd
 import pdfplumber
 import streamlit as st
 
+# função utilitária para converter DataFrame em bytes XLSX
+def df_to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> bytes:
+    buffer = io.BytesIO()
+    try:
+        # usa XlsxWriter se disponível (recomendado para escrita)
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            df.to_excel(writer, index=False, sheet_name=sheet_name)
+            # auto-ajuste de largura de colunas
+            ws = writer.sheets[sheet_name]
+            for i, col in enumerate(df.columns):
+                max_len = max([len(str(x)) for x in df[col].astype(str)] + [len(col)])
+                ws.set_column(i, i, min(max_len + 2, 60))
+    except Exception:
+        # fallback para openpyxl caso xlsxwriter não esteja instalado
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name=sheet_name)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 # ========== Config ==========
 st.set_page_config(page_title="Oposição - Extrator de Tabelas", layout="wide", initial_sidebar_state="expanded")
 
@@ -291,10 +311,13 @@ with left:
                        .reset_index(drop=True))
             st.caption(f"{df_op.shape[0]} linhas • 3 colunas")
             st.dataframe(df_op, use_container_width=True, height=440)
-            st.download_button("Baixar CSV (Oposição)",
-                               data=df_op.to_csv(index=False).encode("utf-8-sig"),
-                               file_name="oposicoes_unificadas.csv",
-                               mime="text/csv")
+            st.download_button(
+                "Baixar XLSX (Oposição)",
+                data=df_to_xlsx_bytes(df_op, sheet_name="Oposicao"),
+                file_name="oposicoes_unificadas.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
 
 # --- Lado direito: Relação de Associados ---
 with right:
@@ -310,7 +333,10 @@ with right:
         else:
             st.caption(f"{df_assoc.shape[0]} linhas • 3 colunas")
             st.dataframe(df_assoc, use_container_width=True, height=440)
-            st.download_button("Baixar CSV (Associados)",
-                               data=df_assoc.to_csv(index=False).encode("utf-8-sig"),
-                               file_name="associados_unificados.csv",
-                               mime="text/csv")
+        st.download_button(
+            "Baixar XLSX (Associados)",
+            data=df_to_xlsx_bytes(df_assoc, sheet_name="Associados"),
+            file_name="associados_unificados.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+

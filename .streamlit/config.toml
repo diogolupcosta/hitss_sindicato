@@ -1,0 +1,7 @@
+[theme]
+base = "light"            # força tema claro
+# (opcional) ajustes de cores:
+primaryColor = "#0F6CBD"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F6F8FA"
+textColor = "#000000"

@@ -17,8 +17,7 @@ st.columns([1, 2, 1])[1].image(str(LOGO_PATH), width=260)
 st.title("Extrator de Tabelas do Sindicato | HITSS")
 st.caption(
     "Carregue um PDF. O app extrai apenas **tabelas**, ignora cabeçalhos/rodapés institucionais, "
-    "e mantém as colunas **nome**, **cpf** e **data de entrega**. Se o cabeçalho não vier claro, "
-    "usamos um fallback por **regex** para identificar CPF e Data."
+    "e mantém as colunas **nome**, **cpf** e **data de entrega**."
 )
 
 # ========== Constantes ==========

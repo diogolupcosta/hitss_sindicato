@@ -21,15 +21,6 @@ st.caption(
     "usamos um fallback por **regex** para identificar CPF e Data."
 )
 
-st.sidebar.write({
-    "python": __import__("sys").version,
-    "streamlit": st.__version__,
-    "pandas": pd.__version__,
-    "pdfplumber": __import__("pdfplumber").__version__,
-    "pdfminer.six": __import__("pdfminer").__version__,
-    "Pillow": __import__("PIL").__version__,
-})
-
 # ========== Constantes ==========
 IGNORES_RAW = [
     "SINDICATO     DOS     EMPREGADOS     EM     EMPRESAS     DE     PROCESSAMENTO     DE     DADOS,     DE SERVIÇOS    DE    COMPUTAÇÃO,    DE    INFORMÁTICA    E    TECNOLOGIA    DA    INFORMAÇÃO    E    DOS TRABALHADORES       EM       PROCESSAMENTO       DE       DADOS,       SERVIÇOS       DE       COMPUTAÇÃO, INFORMÁTICA E TECNOLOGIA DA INFORMAÇÃO DO ESTADO DE SÃO PAULO.",

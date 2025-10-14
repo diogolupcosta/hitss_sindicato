@@ -292,9 +292,9 @@ with left:
             st.caption(f"{df_op.shape[0]} linhas • 3 colunas")
             st.dataframe(df_op, use_container_width=True, height=440)
             st.download_button("Baixar CSV (Oposição)",
-                               data=df_op.to_csv(index=False).encode("utf-8-sig"),
-                               file_name="oposicoes_unificadas.csv",
-                               mime="text/csv")
+                               data=df_op.to_excel(index=False).encode("utf-8-sig"),
+                               file_name="oposicoes_unificadas.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # --- Lado direito: Relação de Associados ---
 with right:
@@ -311,6 +311,6 @@ with right:
             st.caption(f"{df_assoc.shape[0]} linhas • 3 colunas")
             st.dataframe(df_assoc, use_container_width=True, height=440)
             st.download_button("Baixar CSV (Associados)",
-                               data=df_assoc.to_csv(index=False).encode("utf-8-sig"),
-                               file_name="associados_unificados.csv",
-                               mime="text/csv")
+                               data=df_assoc.to_excel(index=False).encode("utf-8-sig"),
+                               file_name="associados_unificados.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

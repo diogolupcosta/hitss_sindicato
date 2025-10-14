@@ -13,11 +13,9 @@ st.set_page_config(page_title="Oposição - Extrator de Tabelas", layout="wide",
 
 # Logo + cabeçalho
 LOGO_PATH = Path(__file__).with_name("Customer-Logos-09.png")
-
-col1, col2, col3 = st.columns([1, 0.4, 1], vertical_alignment="center")
 col1, col2, col3 = st.columns([1, 0.4, 1])  # remova vertical_alignment se der erro
 with col2:
-    st.image(str(LOGO_PATH), use_container_width=True)
+    st.image(str(LOGO_PATH), use_column_width=True)
 
 st.markdown("<h1 style='text-align: center;'>Extrator de Tabelas do Sindicato </h1>", unsafe_allow_html=True)
 

@@ -33,7 +33,7 @@ st.set_page_config(page_title="Oposição - Extrator de Tabelas", layout="wide",
 
 # Logo + cabeçalho
 LOGO_PATH = Path(__file__).with_name("Customer-Logos-09.png")
-col1, col2, col3 = st.columns([1, 0.4, 1])  # remova vertical_alignment se der erro
+col1, col2, col3 = st.columns([1, 0.4, 1])
 with col2:
     st.image(str(LOGO_PATH), use_column_width=True)
 

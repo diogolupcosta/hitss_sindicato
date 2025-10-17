@@ -3,12 +3,13 @@ import re
 import unicodedata
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-
 import pandas as pd
 import pdfplumber
 import streamlit as st
 
 # função utilitária para converter DataFrame em bytes XLSX
+
+
 def df_to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> bytes:
     buffer = io.BytesIO()
     try:
@@ -18,7 +19,8 @@ def df_to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> bytes:
             # auto-ajuste de largura de colunas
             ws = writer.sheets[sheet_name]
             for i, col in enumerate(df.columns):
-                max_len = max([len(str(x)) for x in df[col].astype(str)] + [len(col)])
+                max_len = max([len(str(x))
+                              for x in df[col].astype(str)] + [len(col)])
                 ws.set_column(i, i, min(max_len + 2, 60))
     except Exception:
         # fallback para openpyxl caso xlsxwriter não esteja instalado
@@ -28,16 +30,37 @@ def df_to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> bytes:
     return buffer.getvalue()
 
 
+FGTS_SAMPLE_NAME = "fgts.csv"
+
+
+def load_fgts_csv(raw: bytes) -> pd.DataFrame:
+    """Carrega o CSV do FGTS respeitando separador ';' e decimais com vírgula."""
+    buffer = io.BytesIO(raw)
+    df = pd.read_csv(
+        buffer,
+        sep=";",
+        decimal=",",
+        quotechar='"',
+        dtype=str,
+        encoding="utf-8-sig",
+    )
+    df = df.applymap(lambda v: v.strip() if isinstance(v, str) else v)
+    return df
+
+
 # ========== Config ==========
-st.set_page_config(page_title="Oposição - Extrator de Tabelas", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Oposição - Extrator de Tabelas",
+                   layout="wide", initial_sidebar_state="expanded")
 
 # Logo + cabeçalho
 LOGO_PATH = Path(__file__).with_name("Customer-Logos-09.png")
-col1, col2, col3 = st.columns([1, 0.4, 1])  # remova vertical_alignment se der erro
+# remova vertical_alignment se der erro
+col1, col2, col3 = st.columns([1, 0.4, 1])
 with col2:
     st.image(str(LOGO_PATH), use_column_width=True)
 
-st.markdown("<h1 style='text-align: center;'>Extrator de Tabelas do Sindicato </h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>Extrator de Tabelas do Sindicato </h1>",
+            unsafe_allow_html=True)
 
 # ========== Constantes (Oposição) ==========
 IGNORES_RAW = [
@@ -62,6 +85,8 @@ BRL_VAL_RE = re.compile(r"\b\d{1,3}(?:\.\d{3})*,\d{2}\b")
 PAG_RE = re.compile(r"\bpag\.?\s*:\s*\d+\s*/\s*\d+", re.IGNORECASE)
 
 # ========== Helpers ==========
+
+
 def norm_txt(s: Optional[str]) -> str:
     if s is None:
         return ""
@@ -71,11 +96,14 @@ def norm_txt(s: Optional[str]) -> str:
     s = "".join(ch for ch in s if not unicodedata.combining(ch)).lower()
     return re.sub(r"\s+", " ", s).strip()
 
+
 IGNORES = [norm_txt(x) for x in IGNORES_RAW]
 ASSOC_IGNORES = [norm_txt(x) for x in ASSOC_IGNORES_RAW]
 
+
 def has_ignored_text(text: str) -> bool:
     return any(ign in norm_txt(text) for ign in IGNORES)
+
 
 def has_ignored_text_assoc(text: str) -> bool:
     t = norm_txt(text)
@@ -87,24 +115,31 @@ def has_ignored_text_assoc(text: str) -> bool:
         return True
     return False
 
+
 def clean_cells(df: pd.DataFrame) -> pd.DataFrame:
     return df.applymap(lambda v: v.replace("\n", " ").strip() if isinstance(v, str) else v)
 
+
 def drop_empty_rows_cols(df: pd.DataFrame) -> pd.DataFrame:
     df = df.dropna(axis=1, how="all").dropna(axis=0, how="all")
-    df = df[[c for c in df.columns if not all((str(x).strip() == "" or pd.isna(x)) for x in df[c])]]
-    df = df.loc[~df.apply(lambda r: all((str(x).strip() == "" or pd.isna(x)) for x in r), axis=1)]
+    df = df[[c for c in df.columns if not all(
+        (str(x).strip() == "" or pd.isna(x)) for x in df[c])]]
+    df = df.loc[~df.apply(lambda r: all(
+        (str(x).strip() == "" or pd.isna(x)) for x in r), axis=1)]
     return df.reset_index(drop=True)
+
 
 def is_mostly_int_column(series_or_df: pd.Series | pd.DataFrame, min_ratio: float = 0.8) -> bool:
     if isinstance(series_or_df, pd.DataFrame):
-        series = series_or_df.apply(lambda r: next((x for x in r if pd.notna(x) and str(x).strip() != ""), None), axis=1)
+        series = series_or_df.apply(lambda r: next(
+            (x for x in r if pd.notna(x) and str(x).strip() != ""), None), axis=1)
     else:
         series = series_or_df
     valid = series.dropna().astype(str).str.strip()
     if valid.empty:
         return False
     return (valid.str.match(r"^\d+$").sum() / len(valid)) >= min_ratio
+
 
 def parse_brl_float(s: str) -> Optional[float]:
     if not s:
@@ -116,6 +151,8 @@ def parse_brl_float(s: str) -> Optional[float]:
         return None
 
 # ========== Extração genérica de tabelas ==========
+
+
 def extract_tables_from_pdf(pdf_bytes: bytes) -> List[pd.DataFrame]:
     dfs: List[pd.DataFrame] = []
 
@@ -154,6 +191,7 @@ def extract_tables_from_pdf(pdf_bytes: bytes) -> List[pd.DataFrame]:
                             dfs.append(df)
     return dfs
 
+
 def dedupe_columns(cols) -> list[str]:
     seen, out = {}, []
     for c in map(str, cols):
@@ -166,6 +204,8 @@ def dedupe_columns(cols) -> list[str]:
     return out
 
 # ========== Oposição: normalização ==========
+
+
 def map_by_header(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     df = drop_empty_rows_cols(clean_cells(df))
     if df.empty:
@@ -186,12 +226,17 @@ def map_by_header(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     norm_cols = [norm_txt(c) for c in body.columns]
     colmap: Dict[str, str] = {}
     for i, c in enumerate(norm_cols):
-        if "cpf" in c: colmap["cpf"] = body.columns[i]; break
+        if "cpf" in c:
+            colmap["cpf"] = body.columns[i]
+            break
     for i, c in enumerate(norm_cols):
-        if "nome" in c or "empregado" in c or "trabalhador" in c: colmap["nome"] = body.columns[i]; break
+        if "nome" in c or "empregado" in c or "trabalhador" in c:
+            colmap["nome"] = body.columns[i]
+            break
     for i, c in enumerate(norm_cols):
         if ("data" in c and "entreg" in c) or c == "data" or ("data" in c and "opos" in c):
-            colmap["data de entrega"] = body.columns[i]; break
+            colmap["data de entrega"] = body.columns[i]
+            break
 
     if "data de entrega" not in colmap:
         for col in body.columns:
@@ -204,11 +249,15 @@ def map_by_header(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     if not all(k in colmap for k in required):
         return None
 
-    out = body[[colmap["nome"], colmap["cpf"], colmap["data de entrega"]]].copy()
+    out = body[[colmap["nome"], colmap["cpf"],
+                colmap["data de entrega"]]].copy()
     out.columns = required
-    out = out.loc[~out.apply(lambda r: any(has_ignored_text(str(v)) for v in r), axis=1)]
-    out = out.replace(r"^\s*$", pd.NA, regex=True).dropna(how="all").drop_duplicates().reset_index(drop=True)
+    out = out.loc[~out.apply(lambda r: any(
+        has_ignored_text(str(v)) for v in r), axis=1)]
+    out = out.replace(r"^\s*$", pd.NA, regex=True).dropna(
+        how="all").drop_duplicates().reset_index(drop=True)
     return out if not out.empty else None
+
 
 def parse_by_regex(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     df = drop_empty_rows_cols(clean_cells(df))
@@ -226,28 +275,35 @@ def parse_by_regex(df: pd.DataFrame) -> Optional[pd.DataFrame]:
         m_cpf, m_date = CPF_RE.search(line), DATE_RE.search(line)
         if not (m_cpf and m_date):
             joined = " ".join(cells)
-            m_cpf, m_date = m_cpf or CPF_RE.search(joined), m_date or DATE_RE.search(joined)
+            m_cpf, m_date = m_cpf or CPF_RE.search(
+                joined), m_date or DATE_RE.search(joined)
         if m_cpf and m_date:
             nome = line[: m_cpf.start()].strip()
             cpf = m_cpf.group(0)
             data = m_date.group(0)
             if nome and CPF_RE.fullmatch(cpf) and DATE_RE.fullmatch(data) and not has_ignored_text(nome):
-                rows.append({"nome": nome, "cpf": cpf, "data de entrega": data})
-    out = pd.DataFrame(rows).drop_duplicates().reset_index(drop=True) if rows else None
+                rows.append({"nome": nome, "cpf": cpf,
+                            "data de entrega": data})
+    out = pd.DataFrame(rows).drop_duplicates(
+    ).reset_index(drop=True) if rows else None
     return out if out is not None and not out.empty else None
+
 
 def process_oposicao(pdf_bytes: bytes) -> List[pd.DataFrame]:
     usable: List[pd.DataFrame] = []
     for df in extract_tables_from_pdf(pdf_bytes):
         mapped = map_by_header(df)
         if mapped is not None and not mapped.empty:
-            usable.append(mapped); continue
+            usable.append(mapped)
+            continue
         parsed = parse_by_regex(df)
         if parsed is not None and not parsed.empty:
             usable.append(parsed)
     return usable
 
 # ========== Associados: normalização ==========
+
+
 def parse_associados_df(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     df = drop_empty_rows_cols(clean_cells(df))
     if df.empty:
@@ -270,8 +326,10 @@ def parse_associados_df(df: pd.DataFrame) -> Optional[pd.DataFrame]:
         valor = parse_brl_float(valor_raw)
         if nome and valor is not None:
             rows.append({"matricula": matricula, "nome": nome, "valor": valor})
-    out = pd.DataFrame(rows).drop_duplicates().reset_index(drop=True) if rows else None
+    out = pd.DataFrame(rows).drop_duplicates(
+    ).reset_index(drop=True) if rows else None
     return out if out is not None and not out.empty else None
+
 
 def process_associados(pdf_bytes: bytes) -> pd.DataFrame:
     tables = extract_tables_from_pdf(pdf_bytes)
@@ -289,20 +347,23 @@ def process_associados(pdf_bytes: bytes) -> pd.DataFrame:
              .reset_index(drop=True))
     return out
 
-# ========== UI bipartida ==========
-left, right = st.columns(2, gap="large")
 
-# --- Lado esquerdo: Oposição ---
-with left:
+# ========== UI tripartida ==========
+col_a, col_b, col_c = st.columns(3, gap="large")
+
+# --- Coluna 1: Oposição ---
+with col_a:
     st.subheader("Planilha de Oposição")
-    up_op = st.file_uploader("Upload do Oposições (PDF)", type=["pdf"], key="oposicao")
+    up_op = st.file_uploader("Upload do Oposições (PDF)", type=[
+                             "pdf"], key="oposicao")
     if up_op is None:
         st.info("Envie o PDF de Oposições para extrair (nome / cpf / data de entrega).")
     else:
         with st.spinner("Extraindo dados de Oposição..."):
             tables_op = process_oposicao(up_op.read())
         if not tables_op:
-            st.error("Não consegui mapear nome/CPF/data. Envie 1 página de exemplo para ajustarmos.")
+            st.error(
+                "Não consegui mapear nome/CPF/data. Envie 1 página de exemplo para ajustarmos.")
         else:
             df_op = (pd.concat(tables_op, ignore_index=True)
                        .replace(r"^\s*$", pd.NA, regex=True)
@@ -319,17 +380,20 @@ with left:
             )
 
 
-# --- Lado direito: Relação de Associados ---
-with right:
+# --- Coluna 2: Relação de Associados ---
+with col_b:
     st.subheader("Relação de Associados")
-    up_assoc = st.file_uploader("Upload da Relação de Associados (PDF)", type=["pdf"], key="associados")
+    up_assoc = st.file_uploader("Upload da Relação de Associados (PDF)", type=[
+                                "pdf"], key="associados")
     if up_assoc is None:
-        st.info("Envie o PDF da Relação de Associados para extrair (matrícula / nome / valor).")
+        st.info(
+            "Envie o PDF da Relação de Associados para extrair (matrícula / nome / valor).")
     else:
         with st.spinner("Extraindo dados da Relação de Associados..."):
             df_assoc = process_associados(up_assoc.read())
         if df_assoc.empty:
-            st.error("Não consegui mapear matrícula/nome/valor. Envie 1 página de exemplo para ajustarmos.")
+            st.error(
+                "Não consegui mapear matrícula/nome/valor. Envie 1 página de exemplo para ajustarmos.")
         else:
             st.caption(f"{df_assoc.shape[0]} linhas • 3 colunas")
             st.dataframe(df_assoc, use_container_width=True, height=440)
@@ -340,3 +404,34 @@ with right:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
+
+# --- Coluna 3: FGTS (CSV) ---
+with col_c:
+    st.subheader("FGTS (CSV)")
+    uploaded_csv = st.file_uploader(
+        "Upload do FGTS (CSV)", type=["csv"], key="fgts_csv")
+
+    csv_bytes: Optional[bytes] = None
+    sample_path = Path(__file__).with_name(FGTS_SAMPLE_NAME)
+
+    if uploaded_csv is not None:
+        csv_bytes = uploaded_csv.read()
+
+    if csv_bytes is None:
+        st.info(
+            "Envie o arquivo FGTS em formato CSV para visualizar e baixar os dados.")
+    else:
+        try:
+            df_fgts = load_fgts_csv(csv_bytes)
+        except Exception as exc:
+            st.error(f"Não foi possível ler o CSV: {exc}")
+        else:
+            st.caption(
+                f"{df_fgts.shape[0]} linhas • {df_fgts.shape[1]} colunas")
+            st.dataframe(df_fgts, use_container_width=True, height=440)
+            st.download_button(
+                "Baixar XLSX (FGTS)",
+                data=df_to_xlsx_bytes(df_fgts, sheet_name="FGTS"),
+                file_name="fgts.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )

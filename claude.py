@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any, Tuple
 import pandas as pd
 import pdfplumber
 import streamlit as st
-from pypdf import PdfReader, PdfWriter  # para rotacionar páginas
+from pypdf import PdfReader, PdfWriter
 
 # ========= util XLSX =========
 def df_to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> bytes:
@@ -120,9 +120,9 @@ def rotate_pdf_bytes(pdf_bytes: bytes, degrees_clockwise: int) -> bytes:
     writer = PdfWriter()
     for page in reader.pages:
         try:
-            page.rotate(degrees_clockwise)          # pypdf >= 3
+            page.rotate(degrees_clockwise)
         except Exception:
-            page.rotate_clockwise(degrees_clockwise)  # fallback
+            page.rotate_clockwise(degrees_clockwise)
         writer.add_page(page)
     out = io.BytesIO()
     writer.write(out)
@@ -306,7 +306,7 @@ def process_associados(pdf_bytes: bytes) -> pd.DataFrame:
              .reset_index(drop=True))
     return out
 
-# ========= FGTS – cabeçalho + fallback por palavras =========
+# ========= FGTS – REFINADO =========
 FGTS_CANON = [
     "comp. apuração",
     "comp. referência",
@@ -359,30 +359,25 @@ def _best_header_map(df: pd.DataFrame) -> Optional[Tuple[pd.DataFrame, Dict[str,
 
 def _words_to_df_by_grid(page, header_words: Dict[str, Tuple[float, float, float, float]]) -> pd.DataFrame:
     """
-    Reconstrói a tabela a partir das palavras. 
-    `header_words`: dict com nome canônico -> bbox (x0, top, x1, bottom) do cabeçalho.
+    Reconstrói a tabela extraindo TODAS as palavras da linha e depois mapeando por padrões.
     """
-    # Colunas ordenadas pelo X central do cabeçalho
-    cols_order = [c for c in FGTS_CANON if c in header_words]
-    col_centers = {c: (header_words[c][0] + header_words[c][2]) / 2 for c in cols_order}
-    cols_order.sort(key=lambda c: col_centers[c])
-
+    if "nome trabalhador" not in header_words or "cpf" not in header_words:
+        return pd.DataFrame(columns=FGTS_CANON)
+    
+    header_bottom = header_words["nome trabalhador"][3]
+    
     words = page.extract_words(keep_blank_chars=True, use_text_flow=False, x_tolerance=1, y_tolerance=2)
     if not words:
         return pd.DataFrame(columns=FGTS_CANON)
-
-    # Descobrir faixa vertical da tabela: abaixo do cabeçalho "nome trabalhador"
-    if "nome trabalhador" not in header_words:
-        return pd.DataFrame(columns=FGTS_CANON)
-    header_bottom = header_words["nome trabalhador"][3]
+    
     table_words = [w for w in words if w["top"] > header_bottom + 2]
 
-    # Agrupar linhas por proximidade Y
+    # Agrupa palavras por linha (Y)
     table_words.sort(key=lambda w: w["top"])
     rows: List[List[dict]] = []
     current: List[dict] = []
     last_top = None
-    row_gap = 5  # tolerância vertical
+    row_gap = 5
 
     for w in table_words:
         if last_top is None or abs(w["top"] - last_top) <= row_gap:
@@ -396,115 +391,173 @@ def _words_to_df_by_grid(page, header_words: Dict[str, Tuple[float, float, float
     if current:
         rows.append(current)
 
-    # Função: atribuir palavra à coluna mais próxima pelo x-center
-    def assign_col(w) -> Optional[str]:
-        cx = (w["x0"] + w["x1"]) / 2
-        best_c = None
-        best_d = 1e9
-        for c in cols_order:
-            d = abs(cx - col_centers[c])
-            if d < best_d:
-                best_d = d
-                best_c = c
-        return best_c
-
     out_rows = []
-    for r in rows:
-        buckets = {c: [] for c in FGTS_CANON}
-        for w in r:
-            c = assign_col(w)
-            if c:
-                buckets[c].append(w["text"])
-        # monta linha
-        row = {}
-        for c in FGTS_CANON:
-            txt = " ".join(buckets[c]).strip()
-            row[c] = txt
-        out_rows.append(row)
+    for row_words in rows:
+        # Ordena palavras da linha por posição X
+        row_words_sorted = sorted(row_words, key=lambda w: w["x0"])
+        
+        # Concatena todo o texto da linha para análise
+        full_line = " ".join([w["text"] for w in row_words_sorted])
+        
+        # Extrai campos por padrões de regex
+        comp = ""
+        comp_match = re.search(r'\b(\d{2}/\d{4})\b', full_line)
+        if comp_match:
+            comp = comp_match.group(1)
+        
+        cpf = ""
+        cpf_match = re.search(r'\b(\d{3}\.\d{3}\.\d{3}-\d{2})\b', full_line)
+        if cpf_match:
+            cpf = cpf_match.group(1)
+        
+        # Se não tem CPF, provavelmente não é linha de dados válida
+        if not cpf:
+            continue
+        
+        matricula = ""
+        mat_match = re.search(r'\b(\d{18,25})\b', full_line)
+        if mat_match:
+            matricula = mat_match.group(1)
+        
+        categoria = ""
+        cat_match = re.search(r'\b(10[0-9]|11[0-9])\b', full_line)
+        if cat_match:
+            categoria = cat_match.group(1)
+        
+        vencimento = ""
+        venc_match = re.search(r'\b(\d{2}/\d{2}/\d{4})\b', full_line)
+        if venc_match:
+            vencimento = venc_match.group(1)
+        
+        tipo_deposito = ""
+        if 'Mensal' in full_line or 'mensal' in full_line.lower():
+            tipo_deposito = "Mensal"
+        
+        # Nome: extrai da posição X do cabeçalho "nome trabalhador"
+        nome = ""
+        if "nome trabalhador" in header_words:
+            nome_x0, _, nome_x1, _ = header_words["nome trabalhador"]
+            nome_words = [w for w in row_words if nome_x0 - 20 <= w["x0"] <= nome_x1 + 20]
+            if nome_words:
+                nome_parts = []
+                for w in sorted(nome_words, key=lambda x: x["x0"]):
+                    # Pega apenas palavras em maiúsculas (nomes próprios)
+                    if w["text"] and (w["text"].isupper() or w["text"][0].isupper()):
+                        nome_parts.append(w["text"])
+                nome = " ".join(nome_parts)
+        
+        # Valores monetários: extrai TODOS os números no formato brasileiro
+        valores_raw = re.findall(r'\b(\d{1,3}(?:\.\d{3})*,\d{2})\b', full_line)
+        valores = [parse_brl_float(v) for v in valores_raw]
+        
+        # Mapeia valores para as colunas (ordem esperada do PDF)
+        # Base Remuneração, Valor FGTS, Juros, Atualiz, Multa, Total
+        base_remun = valores[0] if len(valores) > 0 else None
+        valor_fgts = valores[1] if len(valores) > 1 else None
+        juros = valores[2] if len(valores) > 2 else 0.0
+        atualiz = valores[3] if len(valores) > 3 else 0.0
+        multa = valores[4] if len(valores) > 4 else 0.0
+        total = valores[5] if len(valores) > 5 else None
+        
+        # Se não tem total mas tem valor FGTS, assume que são iguais
+        if total is None and valor_fgts is not None:
+            total = valor_fgts
+        
+        row_data = {
+            "comp. apuração": comp,
+            "comp. referência": "",
+            "nome trabalhador": nome,
+            "matrícula": matricula,
+            "cpf": cpf,
+            "categoria": categoria,
+            "vencimento": vencimento,
+            "tipo depósito": tipo_deposito,
+            "base remuneração total": base_remun,
+            "valor fgts na guia": valor_fgts,
+            "juros": juros,
+            "atualiz. monetária": atualiz,
+            "multa": multa,
+            "total": total,
+        }
+        
+        out_rows.append(row_data)
 
-    df = pd.DataFrame(out_rows)
-    # Conversões numéricas
-    for col in ["base remuneração total", "valor fgts na guia", "juros", "atualiz. monetária", "multa", "total"]:
-        if col in df.columns:
-            df[col] = df[col].apply(lambda s: parse_brl_float(s) if re.search(r"\d", str(s)) else pd.NA)
-    return df
+    return pd.DataFrame(out_rows)
 
 def process_fgts(pdf_bytes: bytes) -> pd.DataFrame:
-    # Gira 90° (documento original costuma vir em retrato)
     pdf_bytes = rotate_pdf_bytes(pdf_bytes, 90)
 
-    # 1) Tentativa por extract_tables (pode capturar parte das linhas)
+    # Usa extract_tables que JÁ FUNCIONA para capturar as linhas
     tables = extract_tables_from_pdf(pdf_bytes, rotate_degrees=0)
 
-    # Verifica se há uma tabela com cabeçalho razoável
     best = None
+    best_body = None
     for df in tables:
         m = _best_header_map(df)
         if m:
             best = m
+            best_body = df
             break
 
-    if best:
-        body, colmap = best
-        out = pd.DataFrame()
+    if not best:
+        return pd.DataFrame(columns=FGTS_CANON)
+    
+    body, colmap = best
+    
+    # Processa linha por linha
+    out_rows = []
+    for idx, row in body.iterrows():
+        row_data = {}
+        
+        # Extrai valores de cada coluna mapeada
         for can in FGTS_CANON:
             if can in colmap:
-                out[can] = body.iloc[:, colmap[can]].astype(str).str.strip()
+                val = str(row.iloc[colmap[can]]).strip() if pd.notna(row.iloc[colmap[can]]) else ""
             else:
-                out[can] = ""
-        # números
-        for col in ["base remuneração total", "valor fgts na guia", "juros", "atualiz. monetária", "multa", "total"]:
-            out[col] = out[col].apply(lambda s: parse_brl_float(s) if re.search(r"\d", str(s)) else pd.NA)
-        out = out.replace(r"^\s*$", pd.NA, regex=True).dropna(how="all").drop_duplicates().reset_index(drop=True)
-        if len(out) >= 1:
-            return out
-
-    # 2) Fallback robusto por palavras — ignora cores/linhas e pega TUDO
-    result_parts: List[pd.DataFrame] = []
-    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        for page in pdf.pages:
-            words = page.extract_words(keep_blank_chars=True, use_text_flow=False, x_tolerance=1, y_tolerance=2)
-            if not words:
-                continue
-            # Localiza cabeçalhos na página (por aproximação textual)
-            headers_bbox: Dict[str, Tuple[float, float, float, float]] = {}
-            for w in words:
-                key = norm_txt(w["text"])
-                if key in FGTS_ALIASES:
-                    can = FGTS_ALIASES[key]
-                    if can not in headers_bbox:
-                        headers_bbox[can] = (w["x0"], w["top"], w["x1"], w["bottom"])
-                    else:
-                        # amplia bbox se necessário
-                        x0, top, x1, bottom = headers_bbox[can]
-                        headers_bbox[can] = (min(x0, w["x0"]), min(top, w["top"]), max(x1, w["x1"]), max(bottom, w["bottom"]))
-            # exige pelo menos as colunas-chave para ancorar grade
-            required_keys = {"nome trabalhador", "cpf", "total"}
-            if not required_keys.issubset(set(headers_bbox.keys())):
-                # às vezes o "total" não está visível no cabeçalho; tenta com base remuneração e valor fgts
-                alt_keys = {"nome trabalhador", "cpf", "valor fgts na guia"}
-                if not alt_keys.issubset(set(headers_bbox.keys())):
-                    continue
-
-            df_page = _words_to_df_by_grid(page, headers_bbox)
-            if not df_page.empty:
-                result_parts.append(df_page)
-
-    if not result_parts:
-        return pd.DataFrame(columns=FGTS_CANON)
-
-    out = (pd.concat(result_parts, ignore_index=True)
-             .replace(r"^\s*$", pd.NA, regex=True)
-             .dropna(how="all")
-             .drop_duplicates()
-             .reset_index(drop=True))
-
-    # Garante todas as colunas na ordem canônica
+                val = ""
+            
+            # Conversão especial para campos numéricos
+            if can in ["base remuneração total", "valor fgts na guia", "juros", "atualiz. monetária", "multa", "total"]:
+                parsed = parse_brl_float(val) if re.search(r"\d", val) else None
+                row_data[can] = parsed
+            else:
+                row_data[can] = val
+        
+        # Se a linha não tem valores numéricos mas tem nome, tenta buscar na linha original da tabela
+        if (row_data.get("base remuneração total") is None and 
+            row_data.get("valor fgts na guia") is None and 
+            row_data.get("nome trabalhador")):
+            
+            # Pega a linha RAW completa da tabela original
+            if idx < len(best_body):
+                raw_row = best_body.iloc[idx].tolist()
+                raw_line = " ".join([str(x) for x in raw_row if pd.notna(x)])
+                
+                # Extrai TODOS os valores monetários da linha raw
+                valores_raw = re.findall(r'\b(\d{1,3}(?:\.\d{3})*,\d{2})\b', raw_line)
+                valores = [parse_brl_float(v) for v in valores_raw]
+                
+                # Mapeia valores
+                if len(valores) >= 2:
+                    row_data["base remuneração total"] = valores[0]
+                    row_data["valor fgts na guia"] = valores[1]
+                    row_data["juros"] = valores[2] if len(valores) > 2 else 0.0
+                    row_data["atualiz. monetária"] = valores[3] if len(valores) > 3 else 0.0
+                    row_data["multa"] = valores[4] if len(valores) > 4 else 0.0
+                    row_data["total"] = valores[5] if len(valores) > 5 else valores[1]
+        
+        out_rows.append(row_data)
+    
+    out = pd.DataFrame(out_rows)
+    out = out.replace(r"^\s*$", pd.NA, regex=True).dropna(how="all")
+    
+    # Garante todas as colunas
     for c in FGTS_CANON:
         if c not in out.columns:
             out[c] = pd.NA
-    out = out[FGTS_CANON]
-
+    
+    out = out[FGTS_CANON].drop_duplicates().reset_index(drop=True)
+    
     return out
 
 # ========= UI (3 colunas) =========

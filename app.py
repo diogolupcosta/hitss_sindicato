@@ -31,20 +31,81 @@ def df_to_xlsx_bytes(df: pd.DataFrame, sheet_name: str = "Dados") -> bytes:
 
 
 FGTS_SAMPLE_NAME = "fgts.csv"
+ATIVOS_SAMPLE_NAME = "Ativos_22102025_modelo.csv"
+
+
+def _load_semicolon_csv(
+    raw: bytes,
+    *,
+    encodings: tuple[str, ...] = ("utf-8-sig", "latin-1"),
+    **read_csv_kwargs: Any,
+) -> pd.DataFrame:
+    """Carrega CSV separado por ';' tentando diferentes codificações antes de falhar."""
+    last_error: Optional[Exception] = None
+    for enc in encodings:
+        try:
+            buffer = io.BytesIO(raw)
+            df = pd.read_csv(
+                buffer,
+                sep=";",
+                decimal=",",
+                quotechar='"',
+                dtype=str,
+                encoding=enc,
+                **read_csv_kwargs,
+            )
+            return df
+        except Exception as exc:  # captura UnicodeDecodeError e outros
+            last_error = exc
+            continue
+    raise last_error if last_error else ValueError("Não foi possível decodificar o CSV fornecido.")
 
 
 def load_fgts_csv(raw: bytes) -> pd.DataFrame:
-    """Carrega o CSV do FGTS respeitando separador ';' e decimais com vírgula."""
-    buffer = io.BytesIO(raw)
-    df = pd.read_csv(
-        buffer,
-        sep=";",
-        decimal=",",
-        quotechar='"',
-        dtype=str,
-        encoding="utf-8-sig",
-    )
-    df = df.applymap(lambda v: v.strip() if isinstance(v, str) else v)
+    df = _load_semicolon_csv(raw)
+    return df.applymap(lambda v: v.strip() if isinstance(v, str) else v)
+
+
+def load_ativos_csv(raw: bytes) -> pd.DataFrame:
+    df_raw = _load_semicolon_csv(raw, skiprows=8, header=None)
+    df_raw = df_raw.applymap(lambda v: v.strip() if isinstance(v, str) else v)
+
+    header_idx = None
+    if not df_raw.empty:
+        for idx, value in df_raw.iloc[:, 0].items():
+            if isinstance(value, str) and value.strip().upper() == "MATRICULA":
+                header_idx = idx
+                break
+
+    if header_idx is None:
+        df = df_raw.copy()
+    else:
+        header = df_raw.loc[header_idx].fillna("")
+        df = df_raw.loc[header_idx + 1:].reset_index(drop=True)
+        df.columns = header
+
+    columns = []
+    for name in df.columns:
+        if isinstance(name, str):
+            name = name.strip()
+        columns.append(name)
+
+    clean_cols = []
+    keep_indices = []
+    for idx, name in enumerate(columns):
+        if name and not str(name).startswith("Unnamed"):
+            clean_cols.append(name)
+            keep_indices.append(idx)
+
+    if keep_indices:
+        df = df.iloc[:, keep_indices]
+        df.columns = dedupe_columns(clean_cols)
+
+    if "CARGO" in df.columns:
+        mask = df["CARGO"].str.upper().isin({"APRENDIZ OP MICROCOMPUTADOR", "ESTAGIARIO"})
+        df = df.loc[~mask]
+
+    return df.reset_index(drop=True)
     return df
 
 
@@ -348,8 +409,8 @@ def process_associados(pdf_bytes: bytes) -> pd.DataFrame:
     return out
 
 
-# ========== UI tripartida ==========
-col_a, col_b, col_c = st.columns(3, gap="large")
+# ========== UI quadripartida ==========
+col_a, col_b, col_c, col_d = st.columns(4, gap="large")
 
 # --- Coluna 1: Oposição ---
 with col_a:
@@ -412,7 +473,6 @@ with col_c:
         "Upload do FGTS (CSV)", type=["csv"], key="fgts_csv")
 
     csv_bytes: Optional[bytes] = None
-    sample_path = Path(__file__).with_name(FGTS_SAMPLE_NAME)
 
     if uploaded_csv is not None:
         csv_bytes = uploaded_csv.read()
@@ -434,4 +494,50 @@ with col_c:
                 data=df_to_xlsx_bytes(df_fgts, sheet_name="FGTS"),
                 file_name="fgts.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+
+# --- Coluna 4: Ativos (CSV) ---
+with col_d:
+    st.subheader("Ativos (CSV)")
+    uploaded_ativos = st.file_uploader(
+        "Upload de Ativos (CSV)", type=["csv"], key="ativos_csv")
+
+    ativos_bytes: Optional[bytes] = None
+
+    if uploaded_ativos is not None:
+        ativos_bytes = uploaded_ativos.read()
+
+    if ativos_bytes is None:
+        st.info("Envie o arquivo de Ativos em formato CSV para visualizar e baixar os dados.")
+    else:
+        try:
+            df_ativos = load_ativos_csv(ativos_bytes)
+        except Exception as exc:
+            st.error(f"Não foi possível ler o CSV de Ativos: {exc}")
+        else:
+            st.caption(
+                f"{df_ativos.shape[0]} linhas • {df_ativos.shape[1]} colunas")
+
+            preview_cols = [
+                "MATRICULA",
+                "NOME",
+                "SITUACAO",
+                "DATA_ADMISSAO",
+                "CARGO",
+                "EMPRESA",
+                "LOCALIZACAO",
+                "DEPARTAMENTO",
+                "SALARIO",
+                "EMAIL",
+            ]
+            chosen_cols = [c for c in preview_cols if c in df_ativos.columns]
+            df_preview = df_ativos[chosen_cols].copy() if chosen_cols else df_ativos
+
+            st.dataframe(df_preview, use_container_width=True, height=440)
+            st.download_button(
+                "Baixar XLSX (Ativos)",
+                data=df_to_xlsx_bytes(df_ativos, sheet_name="Ativos"),
+                file_name="ativos.xlsx",
+                mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet",
             )
